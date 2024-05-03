@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "771185889083",
+    "project_id": "homeland-95f19",
+    "storage_bucket": "homeland-95f19.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:771185889083:android:9f667313b7cf6bab12b11e",
+        "android_client_info": {
+          "package_name": "com.example.users"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJ0H1IflNFaMKt7Pnfu4uatPPQ4XvVnrA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
