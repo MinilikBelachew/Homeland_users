@@ -2,7 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'models/all_user.dart';
 
-String mapkey="AIzaSyAleDgZbox33LEXbNbOFjEf9duUA1rjyTA";
+String mapkey="";
 
 User? firebaseUser;
 Users? userCurrentInf;
