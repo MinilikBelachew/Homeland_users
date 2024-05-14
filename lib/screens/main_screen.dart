@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_geofire/flutter_geofire.dart';
 import 'package:animated_text_kit/animated_text_kit.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -12,18 +14,27 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:users/assistant/assistant_methods.dart';
 import 'package:users/assistant/geofire_asistant.dart';
+import 'package:users/assistant/map_kit_assistant.dart';
 import 'package:users/config_maps.dart';
 import 'package:users/data_handler/app_data.dart';
 import 'package:users/main.dart';
 import 'package:users/models/direction_detail.dart';
 import 'package:users/models/nearby_available_driver.dart';
+import 'package:users/screens/about_page.dart';
 import 'package:users/screens/login_screen.dart';
+import 'package:users/screens/package_detail_form.dart';
+import 'package:users/screens/pickup_search_screen.dart';
+import 'package:users/screens/profile_Screen.dart';
+import 'package:users/screens/rating_screen.dart';
 import 'package:users/screens/search_screen.dart';
+import 'package:users/screens/setting.dart';
+import 'package:users/screens/signup_screen.dart';
 import 'package:users/widgets/divider.dart';
 import 'package:users/widgets/nodriver_available_dialog.dart';
 import 'package:users/widgets/progess_dialog.dart';
 import "package:firebase_auth/firebase_auth.dart";
 
+import '../models/package_detail.dart';
 import '../widgets/collect_Birr_dialog.dart';
 
 class MainScreen extends StatefulWidget {
@@ -48,6 +59,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   var geoLocator = Geolocator();
   double bottomPaddingOfMap = 0;
 
+
+
+  Set<Marker> markerSet = Set<Marker>();
+  Set<Circle> circleSet = Set<Circle>();
+
   Set<Marker> markersSet = {};
   double serachContainerHeight = 300;
   double requestRideContainerHeight = 0;
@@ -59,11 +75,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   DatabaseReference? rideRequestRef;
 
   BitmapDescriptor? nearByIcon;
+  BitmapDescriptor? animatingMarkerIcon;
+  late GoogleMapController newRideGoogleMapController;
+  double? driverLat;
+  double? driverLng;
 
   List<NearbyAvailabelDrivers>? availableDrivers;
   String state = "normal";
   double driverDetailsContainerHeight = 0;
   StreamSubscription<DatabaseEvent>? rideStreamSubscription;
+  StreamSubscription<Position>? rideStreamSubscriptiondriver;
+
 
   bool? isRequestingPositionDetails = false;
 
@@ -71,8 +93,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     await getPlaceDirection();
     setState(() {
       serachContainerHeight = 0;
-      rideDetailsContainerHeight = 240;
-      bottomPaddingOfMap = 230;
+      rideDetailsContainerHeight = 400;
+      bottomPaddingOfMap = 440;
     });
   }
 
@@ -94,6 +116,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     });
   }
 
+  String uName = '';
+
   void locateCurrentPosition() async {
     Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high);
@@ -109,8 +133,10 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
     String address =
         await AssistantMethods.searchCoordinateAddress(position, context);
-    print("Address$address");
+
     initGeoFireListner();
+    uName = userCurrentInf!.name!;
+
   }
 
   final Completer<GoogleMapController> _controller =
@@ -148,13 +174,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       markersSet.clear();
       circlesSet.clear();
       pLineCoordinates.clear();
-      statusRide="";
-      driverName="";
-      driverPhone="";
-      carDetailsDriver="";
-      driverDetailsContainerHeight=0;
-
-
+      statusRide = "";
+      driverName = "";
+      driverPhone = "";
+      carDetailsDriver = "";
+      driverDetailsContainerHeight = 0;
     });
     locateCurrentPosition();
   }
@@ -169,6 +193,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   void savedRideRequest() {
     rideRequestRef =
         FirebaseDatabase.instance.ref().child("Ride Request").push();
+    PackageDetails? packageDetails =
+        Provider.of<AppData>(context, listen: false).packageDetails;
+
     var pickUp = Provider.of<AppData>(context, listen: false).pickUpLocation;
     var dropoff = Provider.of<AppData>(context, listen: false).DropOffLocation;
 
@@ -180,17 +207,19 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       "latitude": dropoff!.latitude.toString(),
       "longitude": dropoff.longitude.toString()
     };
-    Map riderInfoMap = {
-      "driver_id": "waiting",
-      "payment_method": "cash",
-      "pickup": pickUpLocMap,
-      "dropoff": dropOffLocMap,
-      "created_at": DateTime.now().toString(),
-      "rider_name": userCurrentInf?.name,
-      "rider_phone": userCurrentInf?.phone,
-      "pickup_address": pickUp.placeName,
-      "dropoff_address": dropoff.placeName
-    };
+  Map riderInfoMap = {
+    "driver_id": "waiting",
+    "payment_method": "cash",
+    "pickup": pickUpLocMap,
+    "dropoff": dropOffLocMap,
+    "created_at": DateTime.now().toString(),
+    "rider_name": userCurrentInf?.name,
+    "rider_phone": userCurrentInf?.phone,
+    "pickup_address": pickUp.placeName,
+    "dropoff_address": dropoff.placeName,
+    "weight": packageDetails!.weight, // Assuming packageDetails is available
+    "package_description": packageDetails!.contentDescription,
+  };
     rideRequestRef!.set(riderInfoMap);
     // rideStreamSubscription = rideRequestRef!.onValue.listen((event) {
     //   if (event.snapshot.value == null) {
@@ -211,7 +240,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     //   }
     // });
 
-    rideStreamSubscription = rideRequestRef!.onValue.listen((event) async{
+    rideStreamSubscription = rideRequestRef!.onValue.listen((event) async {
       if (event.snapshot.value == null || !(event.snapshot.value is Map)) {
         return;
       }
@@ -238,81 +267,107 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           driverPhone = snapshotValue["driver_phone"]!.toString();
         });
       }
-
       if (snapshotValue.containsKey("driver_location") &&
           snapshotValue["driver_location"] is Map) {
-        var driverLocation =
-            snapshotValue["driver_location"] as Map<String, dynamic>;
+        var driverLocation = snapshotValue["driver_location"];
 
-        if (driverLocation.containsKey("latitude") &&
-            driverLocation.containsKey("longitude")) {
-          double driverLat =
-              double.parse(driverLocation["latitude"].toString());
-          double driverLng =
-              double.parse(driverLocation["longitude"].toString());
+        if (driverLocation != null && driverLocation is Map) {
+          var driverLocationMap = driverLocation.cast<String, dynamic>();
 
-          LatLng driverCurrentLocation = LatLng(driverLat, driverLng);
+          if (driverLocationMap.containsKey("latitude") &&
+              driverLocationMap.containsKey("longitude")) {
+            driverLat = double.tryParse(driverLocation["latitude"].toString());
+            driverLng = double.tryParse(driverLocation["longitude"].toString());
+            // double? driverLat =
+            //     double.tryParse(driverLocationMap["latitude"].toString());
+            // double? driverLng =
+            //     double.tryParse(driverLocationMap["longitude"].toString());
+
+            if (driverLat != null && driverLng != null) {
+              LatLng driverCurrentLocation = LatLng(driverLat!, driverLng!);
+              // Now you can use driverCurrentLocation
+
+              // if (snapshotValue.containsKey("driver_location") &&
+              //     snapshotValue["driver_location"] is Map) {
+              //   var driverLocation =
+              //       snapshotValue["driver_location"] as Map<String, dynamic>;
+              //
+              //   if (driverLocation.containsKey("latitude") &&
+              //       driverLocation.containsKey("longitude")) {
+              //     double driverLat =
+              //         double.parse(driverLocation["latitude"].toString());
+              //     double driverLng =
+              //         double.parse(driverLocation["longitude"].toString());
+              //
+              //     LatLng driverCurrentLocation = LatLng(driverLat, driverLng);
+
+              if (statusRide == "accepted") {
+
+
+                getLiveLocationUpdates(driverLat!, driverLng!);
+
+
+                updateRideTimeToPickUpLoc(driverCurrentLocation);
+              } else if (statusRide == "onride") {
+                updateRideTimeDropOffLoc(driverCurrentLocation);
+              } else if (statusRide == "arrived") {
+                rideStatus = "Driver Has Arrived";
+              }
+
+              // Do something with driverCurrentLocation if needed.
+            }
+          }
+
+          if (snapshotValue.containsKey("status") &&
+              snapshotValue["status"] is String) {
+            statusRide = snapshotValue["status"]!.toString();
+          }
 
           if (statusRide == "accepted") {
-            updateRideTimeToPickUpLoc(driverCurrentLocation);
+            displaydriverDetailsContainerHeight();
+            Geofire.stopListener();
+            deleteGeofileMarkers();
           }
-          else if(statusRide == "onride")
-          {
-            updateRideTimeDropOffLoc(driverCurrentLocation);
-          }
-          else if(statusRide == "arrived")
-            {
-              rideStatus="Driver Has Arrived";
-            }
 
-          // Do something with driverCurrentLocation if needed.
-        }
-      }
+          if (statusRide == "ended") {
+            if (snapshotValue["fares"] != null) {
+              int fare = int.parse(snapshotValue["fares"].toString());
 
-      if (snapshotValue.containsKey("status") &&
-          snapshotValue["status"] is String) {
-        statusRide = snapshotValue["status"]!.toString();
-      }
-
-      if (statusRide == "accepted") {
-        displaydriverDetailsContainerHeight();
-        Geofire.stopListener();
-        deleteGeofileMarkers();
-      }
-
-      if(statusRide == "ended")
-        {
-          if(snapshotValue["fares"]!= null)
-            {
-              int fare=int.parse(snapshotValue["fares"].toString());
-
-              var res=await showDialog(context: context,
+              var res = await showDialog(
+                  context: context,
                   barrierDismissible: false,
-                  builder: (BuildContext context)=>CollectBirrDialog(paymentMethod:"cash",fareAmount:fare)
-              );
-              if(res == "close")
-                {
-                  rideRequestRef!.onDisconnect();
-                  rideRequestRef=null;
-                  rideStreamSubscription!.cancel();
-                  rideStreamSubscription=null;
-                  resetApp();
+                  builder: (BuildContext context) => CollectBirrDialog(
+                      paymentMethod: "cash", fareAmount: fare));
+
+              String driverId = "";
+
+              if (res == "close") {
+                if (snapshotValue["driver_id"] != null) {
+                  driverId = snapshotValue["driver_id"].toString();
                 }
+
+                Navigator.of(context).push(MaterialPageRoute(
+                    builder: (context) => RatingScreen(driverId: driverId)));
+
+                rideRequestRef!.onDisconnect();
+                rideRequestRef = null;
+                rideStreamSubscription!.cancel();
+                rideStreamSubscription = null;
+                resetApp();
+              }
             }
 
-
-       //   if(snapshotValue[])
+            //   if(snapshotValue[])
+          }
         }
-
-
+      }
     });
   }
 
-
-  void deleteGeofileMarkers()
-  {
+  void deleteGeofileMarkers() {
     setState(() {
-      markersSet.removeWhere((element) => element.markerId.value.contains("driver"));
+      markersSet
+          .removeWhere((element) => element.markerId.value.contains("driver"));
     });
   }
 
@@ -335,12 +390,14 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       isRequestingPositionDetails = false;
     }
   }
+
   void updateRideTimeDropOffLoc(LatLng driverCurrentLocation) async {
     if (isRequestingPositionDetails == false) {
       isRequestingPositionDetails = true;
 
-     var dropOff=Provider.of<AppData>(context,listen: false).DropOffLocation;
-     var dropOffUserLatLng=LatLng(dropOff!.latitude!, dropOff!.longitude!);
+      var dropOff =
+          Provider.of<AppData>(context, listen: false).DropOffLocation;
+      var dropOffUserLatLng = LatLng(dropOff!.latitude!, dropOff!.longitude!);
 
       var details = await AssistantMethods.obtainPlaceDirectionsDetails(
           driverCurrentLocation, dropOffUserLatLng);
@@ -356,13 +413,74 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
   }
 
+
+  createIconMarkerLocationTracking() {
+    if (animatingMarkerIcon == null) {
+      ImageConfiguration imageConfiguration =
+      createLocalImageConfiguration(context, size: Size(2, 2));
+      BitmapDescriptor.fromAssetImage(imageConfiguration, "images/taxi.png")
+          .then((value) {
+        animatingMarkerIcon = value;
+      });
+    }
+  }
+
+  void getLiveLocationUpdates(double driverLat, double driverLng) {
+    LatLng oldPos = LatLng(driverLat, driverLng); // Initialize with driver's initial position
+
+    rideStreamSubscriptiondriver = Geolocator.getPositionStream().listen((Position position) {
+      // Update the old position with the new position of the driver
+      LatLng driverCurrentLocation = LatLng(driverLat, driverLng);
+
+      var rot = MapKitAssistant.getMarkerRotation(oldPos.latitude,
+          oldPos.longitude, driverCurrentLocation.latitude, driverCurrentLocation.longitude);
+
+      Marker animatingMarker = Marker(
+          markerId: MarkerId("animating"),
+          position: driverCurrentLocation,
+        // icon: animatingMarkerIcon!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+
+          rotation: rot,
+          infoWindow: InfoWindow(title: "CurrentLocation"));
+
+      setState(() {
+        CameraPosition cameraPosition =
+        new CameraPosition(target: driverCurrentLocation, zoom: 17);
+        newRideGoogleMapController
+            .animateCamera(CameraUpdate.newCameraPosition(cameraPosition));
+
+        markerSet.removeWhere((marker) => marker.markerId.value == "animating");
+
+        markerSet.add(animatingMarker);
+      });
+      oldPos = driverCurrentLocation; // Update old position with the driver's current location
+
+
+      Map locMap = {
+        "latitude": driverCurrentLocation.latitude.toString(),
+        "longitude": driverCurrentLocation.longitude.toString()
+      };
+    });
+  }
+
+
+
+
+
+
+
   @override
   Widget build(BuildContext context) {
     createIconMarker();
+    AppData languageProvider = Provider.of<AppData>(context);
+    var language = languageProvider.isEnglishSelected ;
+
+
     return Scaffold(
       key: scaffoldkey,
       appBar: AppBar(
-        title: const Text('Homeland'),
+        title:  Text(language? "Homeland":"ሀገር ቤት"),
         backgroundColor: Colors.tealAccent,
         actions: <Widget>[
           PopupMenuButton<String>(
@@ -376,9 +494,20 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             },
             itemBuilder: (BuildContext context) {
               return <PopupMenuEntry<String>>[
-                const PopupMenuItem<String>(
+                 PopupMenuItem<String>(
                   value: 'Settings',
-                  child: Text('Settings'),
+                  child: Column(children: [
+                    GestureDetector(
+                        onTap:(){
+                          Navigator.push(context, MaterialPageRoute(builder: (context) =>  SettingPage()));
+
+
+                        },
+                        child: Text(language?"Settings":"ቅንብሮች")),
+
+
+
+                  ],),
                 ),
               ];
             },
@@ -386,37 +515,49 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         ],
       ),
       drawer: Container(
-        color: Colors.white,
+        color: Colors.black,
         width: 255,
         child: Drawer(
           child: ListView(
             children: [
               SizedBox(
                 height: 165,
-                child: DrawerHeader(
-                  decoration: const BoxDecoration(color: Colors.white),
-                  child: Row(
+
+                child:
+                DrawerHeader(
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    border: Border.all(color: Colors.greenAccent!),
+                    borderRadius: BorderRadius.all(Radius.circular(50)), // Use BorderRadius.all
+                  ),
+
+                  child: Column(
                     children: [
                       Image.asset(
                         "images/user_icon.png",
-                        height: 65,
-                        width: 65,
+                        height: 85,
+                        width: 85,
                       ),
                       const SizedBox(
                         width: 16,
                       ),
-                      const Column(
+                      Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            "Profile Name",
+                            uName,
                             style: TextStyle(
                                 fontSize: 16, fontFamily: "Brand-Bold"),
                           ),
                           SizedBox(
                             height: 6,
                           ),
-                          Text("Visit Profile")
+                          // GestureDetector(
+                          //     onTap: () {
+                          //       displayToastMessage(
+                          //           "Under Development", context);
+                          //     },
+                          //     child: Text(language?"Visit Profile":"መገለጫን ጎብኝ"))
                         ],
                       )
                     ],
@@ -427,41 +568,56 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               const SizedBox(
                 height: 12,
               ),
-              const ListTile(
+               ListTile(
                 leading: Icon(Icons.history),
-                title: Text(
-                  "History",
+                title: Text( language?"History":"ታሪክ",
                   style: TextStyle(fontSize: 15),
                 ),
               ),
-              const ListTile(
-                leading: Icon(Icons.person),
-                title: Text(
-                  "Visit Profile",
-                  style: TextStyle(fontSize: 15),
-                ),
-              ),
-              const ListTile(
-                leading: Icon(Icons.info),
-                title: Text(
-                  "About",
-                  style: TextStyle(fontSize: 15),
-                ),
-              ),
+              GestureDetector(
+                onTap: (){
+                  Navigator.push(context, MaterialPageRoute(builder: (context) =>  ProfilePage(userId: userCurrentInf!.id!)));
+
+
+                },
+                 child: ListTile(
+                  leading: Icon(Icons.person_outline),
+                  title: Text(language?
+                    "Visit Profile":"መገለጫን ጎብኝ",
+                    style: TextStyle(fontSize: 15),
+                  ),
+                               ),
+               ),
+              GestureDetector(
+                onTap: (){
+                  Navigator.push(context, MaterialPageRoute(builder: (context) =>  AboutPage()));
+
+
+                },
+                 child: ListTile(
+                  leading: Icon(Icons.info_outline),
+                  title: Text(language?
+                    "About":"ስለ",
+                    style: TextStyle(fontSize: 15),
+                  ),
+                               ),
+               ),
               GestureDetector(
                 onTap: () {
                   FirebaseAuth.instance.signOut();
                   Navigator.pushNamedAndRemoveUntil(
                       context, LoginScreen.idScreen, (route) => false);
                 },
-                child: const ListTile(
-                  leading: Icon(Icons.info),
-                  title: Text(
-                    "Logout",
+                child:  ListTile(
+                  leading: Icon(Icons.logout),
+                  title: Text(language?
+                    "Logout":"ውጣ",
                     style: TextStyle(fontSize: 15, color: Colors.red),
                   ),
                 ),
-              )
+              ),
+
+
             ],
           ),
         ),
@@ -481,10 +637,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             onMapCreated: (GoogleMapController controller) {
               _controller.complete(controller);
               newGoogleMapController = controller;
+              newRideGoogleMapController = controller;
+
               setState(() {
                 bottomPaddingOfMap = 300;
               });
               locateCurrentPosition();
+
+
+              getLiveLocationUpdates(driverLat!, driverLng!);
             },
           ),
           Positioned(
@@ -514,20 +675,106 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(
-                        height: 6,
-                      ),
-                      const Text(
-                        "Hi there",
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      const Text(
-                        "where to ?",
+
+                       Text(
+                        language ? "where to ?":"ወዴት",
                         style:
                             TextStyle(fontSize: 20, fontFamily: "Brand-Bold"),
                       ),
                       const SizedBox(
                         height: 20,
+                      ),
+                      GestureDetector(
+                        onTap: () async {
+                          var res = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) =>
+                                  const PackageDetailsForm()));
+
+                          if (res == "obtainDirection") {
+                            displayRideDetailsContainer();
+                          }
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(5),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black54,
+                                  blurRadius: 16,
+                                  offset: Offset(0.7, 0.7),
+                                )
+                              ]),
+                          child: Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.description,
+                                  color: Colors.blueGrey,
+                                ),
+                                SizedBox(
+                                  width: 10,
+                                ),
+                                Text(language?"freight detail":"የጭነት ዝርዝር አስገባ")
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(
+                        height: 24,
+                      ),
+                      GestureDetector(
+                        onTap: () async {
+                          var res = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) =>
+                                      const PickupSearchScreen()));
+
+                          if (res == "obtainDirection") {
+                            displayRideDetailsContainer();
+                          }
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(5),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black54,
+                                  blurRadius: 16,
+                                  offset: Offset(0.7, 0.7),
+                                )
+                              ]),
+                          child: Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.search,
+                                  color: Colors.blueGrey,
+                                ),
+                                SizedBox(
+                                  width: 10,
+                                ),
+                                Text(Provider.of<AppData>(context)
+                                            .pickUpLocation !=
+                                        null
+                                    ? Provider.of<AppData>(context)
+                                        .pickUpLocation!
+                                        .placeName!
+                                    : language?"Search pick up":"የመነሻ ቦታን ይፈልጉ",overflow: TextOverflow.ellipsis,)
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(
+                        height: 24,
                       ),
                       GestureDetector(
                         onTap: () async {
@@ -551,7 +798,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                   offset: Offset(0.7, 0.7),
                                 )
                               ]),
-                          child: const Padding(
+                          child: Padding(
                             padding: EdgeInsets.all(12.0),
                             child: Row(
                               children: [
@@ -562,95 +809,100 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                 SizedBox(
                                   width: 10,
                                 ),
-                                Text("Search drop off")
+                                Text(Provider.of<AppData>(context)
+                                            .DropOffLocation !=
+                                        null
+                                    ? Provider.of<AppData>(context)
+                                        .DropOffLocation!
+                                        .placeName!
+                                    : language?"Search destination location":"የመድረሻ ቦታን ይፈልጉ",overflow: TextOverflow.ellipsis)
                               ],
                             ),
                           ),
                         ),
                       ),
-                      const SizedBox(
-                        height: 24,
-                      ),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.home,
-                            color: Colors.blueGrey,
-                          ),
-                          const SizedBox(
-                            width: 12,
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                Provider.of<AppData>(context).pickUpLocation !=
-                                        null
-                                    ? Provider.of<AppData>(context)
-                                        .pickUpLocation!
-                                        .placeName!
-                                    : "Add home",
-                              ),
-                              const SizedBox(
-                                height: 4,
-                              ),
-                              const Text(
-                                "Your Living Address",
-                                style: TextStyle(
-                                    color: Colors.black87, fontSize: 12),
-                              )
-                            ],
-                          )
-                        ],
-                      ),
-                      const SizedBox(
-                        height: 10,
-                      ),
-                      const DividerWidget(),
-                      const SizedBox(
-                        height: 10,
-                      ),
-                      const Row(
-                        children: [
-                          Icon(
-                            Icons.work,
-                            color: Colors.blueGrey,
-                          ),
-                          SizedBox(
-                            width: 12,
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text("Add Work"),
-                              SizedBox(
-                                height: 4,
-                              ),
-                              Text(
-                                "Your Office Address",
-                                style: TextStyle(
-                                    color: Colors.black54, fontSize: 12),
-                              )
-                            ],
-                          )
-                        ],
-                      ),
+
+                      // Row(
+                      //   children: [
+                      //     const Icon(
+                      //       Icons.home,
+                      //       color: Colors.blueGrey,
+                      //     ),
+                      //     const SizedBox(
+                      //       width: 12,
+                      //     ),
+                      //     Column(
+                      //       crossAxisAlignment: CrossAxisAlignment.start,
+                      //       children: [
+                      //         Text(
+                      //           Provider.of<AppData>(context).pickUpLocation !=
+                      //                   null
+                      //               ? Provider.of<AppData>(context)
+                      //                   .pickUpLocation!
+                      //                   .placeName!
+                      //               : "Add home",
+                      //         ),
+                      //         const SizedBox(
+                      //           height: 4,
+                      //         ),
+                      //         const Text(
+                      //           "Your Living Address",
+                      //           style: TextStyle(
+                      //               color: Colors.black87, fontSize: 12),
+                      //         )
+                      //       ],
+                      //     )
+                      //   ],
+                      // ),
+                      // const SizedBox(
+                      //   height: 10,
+                      // ),
+                      // const DividerWidget(),
+                      // const SizedBox(
+                      //   height: 10,
+                      // ),
+                      // const Row(
+                      //   children: [
+                      //     Icon(
+                      //       Icons.work,
+                      //       color: Colors.blueGrey,
+                      //     ),
+                      //     SizedBox(
+                      //       width: 12,
+                      //     ),
+                      //     Column(
+                      //       crossAxisAlignment: CrossAxisAlignment.start,
+                      //       children: [
+                      //         Text("Add Work"),
+                      //         SizedBox(
+                      //           height: 4,
+                      //         ),
+                      //         Text(
+                      //           "Your Office Address",
+                      //           style: TextStyle(
+                      //               color: Colors.black54, fontSize: 12),
+                      //         )
+                      //       ],
+                      //     )
+                      //   ],
+                      // ),
                     ],
                   ),
                 ),
               ),
             ),
           ),
+
           Positioned(
               bottom: 0,
               left: 0,
               right: 0,
               child: AnimatedSize(
                 curve: Curves.bounceIn,
-                duration: const Duration(milliseconds: 200),
+                duration: new Duration(milliseconds: 200),
                 child: Container(
                   height: rideDetailsContainerHeight,
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.only(
                         topLeft: Radius.circular(16),
@@ -664,14 +916,14 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                             offset: Offset(0.7, 0.7))
                       ]),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: EdgeInsets.symmetric(vertical: 16),
                     child: Column(
                       children: [
                         Container(
                           width: double.infinity,
                           color: Colors.tealAccent,
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            padding: EdgeInsets.symmetric(horizontal: 16),
                             child: Row(
                               children: [
                                 Image.asset(
@@ -679,13 +931,13 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                   height: 70,
                                   width: 80,
                                 ),
-                                const SizedBox(
+                                SizedBox(
                                   width: 16,
                                 ),
                                 Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       "Car",
                                       style: TextStyle(
                                           fontSize: 18,
@@ -695,7 +947,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                       ((directioDetail != null)
                                           ? directioDetail!.distanceText!
                                           : ' '),
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           fontSize: 16, color: Colors.grey),
                                     )
                                   ],
@@ -705,7 +957,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                   ((directioDetail != null)
                                       ? '\$${AssistantMethods.caculatePrice(directioDetail!)}'
                                       : ""),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 16,
                                       color: Colors.grey,
                                       fontFamily: "Brand-Bold"),
@@ -714,10 +966,10 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                             ),
                           ),
                         ),
-                        const SizedBox(
+                        SizedBox(
                           height: 20,
                         ),
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.symmetric(horizontal: 16),
                           child: Row(
                             children: [
@@ -741,23 +993,19 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                             ],
                           ),
                         ),
-                        const SizedBox(
+                        SizedBox(
                           height: 20,
                         ),
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(horizontal: 16),
                           child: ElevatedButton(
                             onPressed: () {
-                              setState(() {
-                                state = "requesting";
-                              });
-
                               displayRequestRideContainer();
-                              availableDrivers =
-                                  GeoFireAssistant.nearByAvailableDriversList;
-                              searchNearestDaiver();
+                                                   availableDrivers =
+                                                       GeoFireAssistant.nearByAvailableDriversList;
+                                                   searchNearestDaiver();
                             },
-                            child: const Padding(
+                            child: Padding(
                               padding: EdgeInsets.fromLTRB(5, 0, 5, 0),
                               child: Row(
                                 mainAxisAlignment:
@@ -786,6 +1034,308 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                   ),
                 ),
               )),
+
+          // Positioned(
+          //     bottom: 0,
+          //     left: 0,
+          //     right: 0,
+          //     child: AnimatedSize(
+          //       curve: Curves.bounceIn,
+          //       duration: const Duration(milliseconds: 200),
+          //       child: Container(
+          //         height: rideDetailsContainerHeight,
+          //         decoration: const BoxDecoration(
+          //             color: Colors.white,
+          //             borderRadius: BorderRadius.only(
+          //               topLeft: Radius.circular(16),
+          //               topRight: Radius.circular(16),
+          //             ),
+          //             boxShadow: [
+          //               BoxShadow(
+          //                   color: Colors.black,
+          //                   blurRadius: 16,
+          //                   spreadRadius: 0.5,
+          //                   offset: Offset(0.7, 0.7))
+          //             ]),
+          //         child: Padding(
+          //           padding: const EdgeInsets.symmetric(vertical: 16),
+          //           child: Column(
+          //             children: [
+          //               GestureDetector(
+          //                 onTap: ()
+          //                 {
+          //                   setState(() {
+          //                     state = "requesting";
+          //                     carRideType="bike";
+          //
+          //                   });
+          //
+          //                   displayRequestRideContainer();
+          //                   availableDrivers =
+          //                       GeoFireAssistant.nearByAvailableDriversList;
+          //                   searchNearestDaiver();
+          //
+          //                 },
+          //                 child: Container(
+          //                   width: double.infinity,
+          //                   color: Colors.tealAccent,
+          //                   child: Padding(
+          //                     padding: const EdgeInsets.symmetric(horizontal: 16),
+          //                     child: Row(
+          //                       children: [
+          //                         Image.asset(
+          //                           "images/065 bike.png",
+          //                           height: 70,
+          //                           width: 80,
+          //                         ),
+          //                         const SizedBox(
+          //                           width: 16,
+          //                         ),
+          //                         Column(
+          //                           crossAxisAlignment: CrossAxisAlignment.start,
+          //                           children: [
+          //                             const Text(
+          //                               "Bike",
+          //                               style: TextStyle(
+          //                                   fontSize: 18,
+          //                                   fontFamily: "Brand-Bold"),
+          //                             ),
+          //                             Text(
+          //                               ((directioDetail != null)
+          //                                   ? directioDetail!.distanceText!
+          //                                   : ' '),
+          //                               style: const TextStyle(
+          //                                   fontSize: 16, color: Colors.grey),
+          //                             )
+          //                           ],
+          //                         ),
+          //                         Expanded(child: Container()),
+          //                         Text(
+          //                           ((directioDetail != null)
+          //                               ? '\$${(AssistantMethods.caculatePrice(directioDetail!)/2)}'
+          //                               : ""),
+          //                           style: const TextStyle(
+          //                               fontSize: 16,
+          //                               color: Colors.grey,
+          //                               fontFamily: "Brand-Bold"),
+          //                         )
+          //                       ],
+          //                     ),
+          //                   ),
+          //                 ),
+          //               ),
+          //               const SizedBox(
+          //                 height: 10,
+          //               ),
+          //               Divider(height: 2,thickness: 2,),
+          //               const SizedBox(
+          //                 height: 10,
+          //               ),
+          //
+          //               GestureDetector(
+          //                 onTap: ()
+          //                 {
+          //                   setState(() {
+          //                     state = "requesting";
+          //                     carRideType="uber-go";
+          //                   });
+          //
+          //                   displayRequestRideContainer();
+          //                   availableDrivers =
+          //                       GeoFireAssistant.nearByAvailableDriversList;
+          //                   searchNearestDaiver();
+          //
+          //                 },
+          //                 child: Container(
+          //                   width: double.infinity,
+          //                   color: Colors.tealAccent,
+          //                   child: Padding(
+          //                     padding: const EdgeInsets.symmetric(horizontal: 16),
+          //                     child: Row(
+          //                       children: [
+          //                         Image.asset(
+          //                           "images/065 ubergo.png",
+          //                           height: 70,
+          //                           width: 80,
+          //                         ),
+          //                         const SizedBox(
+          //                           width: 16,
+          //                         ),
+          //                         Column(
+          //                           crossAxisAlignment: CrossAxisAlignment.start,
+          //                           children: [
+          //                             const Text(
+          //                               "Isuzu",
+          //                               style: TextStyle(
+          //                                   fontSize: 18,
+          //                                   fontFamily: "Brand-Bold"),
+          //                             ),
+          //                             Text(
+          //                               ((directioDetail != null)
+          //                                   ? directioDetail!.distanceText!
+          //                                   : ' '),
+          //                               style: const TextStyle(
+          //                                   fontSize: 16, color: Colors.grey),
+          //                             )
+          //                           ],
+          //                         ),
+          //                         Expanded(child: Container()),
+          //                         Text(
+          //                           ((directioDetail != null)
+          //                               ? '\$${(AssistantMethods.caculatePrice(directioDetail!)) * 2}'
+          //                               : ""),
+          //                           style: const TextStyle(
+          //                               fontSize: 16,
+          //                               color: Colors.grey,
+          //                               fontFamily: "Brand-Bold"),
+          //                         )
+          //                       ],
+          //                     ),
+          //                   ),
+          //                 ),
+          //               ),
+          //               const SizedBox(
+          //                 height: 10,
+          //               ),
+          //               Divider(height: 2,thickness: 2,),
+          //               const SizedBox(
+          //                 height: 10,
+          //               ),
+          //               GestureDetector(
+          //                 onTap: ()
+          //                 {
+          //
+          //                     setState(() {
+          //                       state = "requesting";
+          //                       carRideType="uber-x";
+          //
+          //                     });
+          //
+          //                     displayRequestRideContainer();
+          //                     availableDrivers =
+          //                         GeoFireAssistant.nearByAvailableDriversList;
+          //                     searchNearestDaiver();
+          //
+          //
+          //                 },
+          //                 child: Container(
+          //                   width: double.infinity,
+          //                   color: Colors.tealAccent,
+          //                   child: Padding(
+          //                     padding: const EdgeInsets.symmetric(horizontal: 16),
+          //                     child: Row(
+          //                       children: [
+          //                         Image.asset(
+          //                           "images/065 uberx.png",
+          //                           height: 70,
+          //                           width: 80,
+          //                         ),
+          //                         const SizedBox(
+          //                           width: 16,
+          //                         ),
+          //                         Column(
+          //                           crossAxisAlignment: CrossAxisAlignment.start,
+          //                           children: [
+          //                             const Text(
+          //                               "Car",
+          //                               style: TextStyle(
+          //                                   fontSize: 18,
+          //                                   fontFamily: "Brand-Bold"),
+          //                             ),
+          //                             Text(
+          //                               ((directioDetail != null)
+          //                                   ? directioDetail!.distanceText!
+          //                                   : ' '),
+          //                               style: const TextStyle(
+          //                                   fontSize: 16, color: Colors.grey),
+          //                             )
+          //                           ],
+          //                         ),
+          //                         Expanded(child: Container()),
+          //                         Text(
+          //                           ((directioDetail != null)
+          //                               ? '\$${AssistantMethods.caculatePrice(directioDetail!)}'
+          //                               : ""),
+          //                           style: const TextStyle(
+          //                               fontSize: 16,
+          //                               color: Colors.grey,
+          //                               fontFamily: "Brand-Bold"),
+          //                         )
+          //                       ],
+          //                     ),
+          //                   ),
+          //                 ),
+          //               ),
+          //               const SizedBox(
+          //                 height: 10,
+          //               ),
+          //               Divider(height: 2,thickness: 2,),
+          //               const SizedBox(
+          //                 height: 10,
+          //               ),
+          //
+          //
+          //               const Padding(
+          //                 padding: EdgeInsets.symmetric(horizontal: 16),
+          //                 child: Row(
+          //                   children: [
+          //                     Icon(
+          //                       FontAwesomeIcons.moneyCheckAlt,
+          //                       size: 18,
+          //                       color: Colors.black,
+          //                     ),
+          //                     SizedBox(
+          //                       width: 16,
+          //                     ),
+          //                     Text("CASH"),
+          //                     SizedBox(
+          //                       width: 6,
+          //                     ),
+          //                     Icon(
+          //                       Icons.keyboard_arrow_down,
+          //                       color: Colors.black54,
+          //                       size: 16,
+          //                     )
+          //                   ],
+          //                 ),
+          //               ),
+          //               const SizedBox(
+          //                 height: 20,
+          //               ),
+          //               // Padding(
+          //               //   padding: const EdgeInsets.symmetric(horizontal: 16),
+          //               //   child: ElevatedButton(
+          //               //
+          //               //     child: const Padding(
+          //               //       padding: EdgeInsets.fromLTRB(5, 0, 5, 0),
+          //               //       child: Row(
+          //               //         mainAxisAlignment:
+          //               //             MainAxisAlignment.spaceBetween,
+          //               //         children: [
+          //               //           Text(
+          //               //             "Request",
+          //               //             style: TextStyle(
+          //               //               fontSize: 20,
+          //               //               fontWeight: FontWeight.bold,
+          //               //               color: Colors.black87,
+          //               //             ),
+          //               //           ),
+          //               //           Icon(
+          //               //             FontAwesomeIcons.truck,
+          //               //             color: Colors.black54,
+          //               //             size: 26,
+          //               //           )
+          //               //         ],
+          //               //       ),
+          //               //     ),
+          //               //   ),
+          //               // )
+          //             ],
+          //           ),
+          //         ),
+          //       ),
+          //     )),
+
           Positioned(
             bottom: 0,
             left: 0,
@@ -925,33 +1475,43 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              
-                              Padding(padding: EdgeInsets.symmetric(horizontal: 25),
-                              
-                              child: ElevatedButton(
-                                onPressed: () async {
-                                  if (await canLaunch('tel://$driverPhone')) {
-                                    await launch('tel://$driverPhone');
-                                  } else {
-                                    // Handle case where phone number can't be launched
-                                  }
-                                },
-
-                                child: Padding(
-                                  padding: EdgeInsets.all(17),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                    children: [
-                                      Text("Call Driver",style: TextStyle(fontSize: 20,fontWeight: FontWeight.bold,color: Colors.green),),
-                                      SizedBox(width: 10,),
-                                      Icon(Icons.call,color: Colors.black,size: 26,)
-                                    ],
+                              Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 25),
+                                child: ElevatedButton(
+                                  onPressed: () async {
+                                    if (await canLaunch('tel://$driverPhone')) {
+                                      await launch('tel://$driverPhone');
+                                    } else {
+                                      // Handle case where phone number can't be launched
+                                    }
+                                  },
+                                  child: Padding(
+                                    padding: EdgeInsets.all(17),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceEvenly,
+                                      children: [
+                                        Text(
+                                          "Call Driver",
+                                          style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.green),
+                                        ),
+                                        SizedBox(
+                                          width: 10,
+                                        ),
+                                        Icon(
+                                          Icons.call,
+                                          color: Colors.black,
+                                          size: 26,
+                                        )
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                              
                               )
-                              
+
                               // Column(
                               //   mainAxisAlignment: MainAxisAlignment.start,
                               //   children: [
@@ -1235,6 +1795,27 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
     notifyDriver(driver);
     availableDrivers!.removeAt(0);
+
+
+    // driverRref
+    //     .child(driver.key!)
+    //     .child("car_details")
+    //     .child("type")
+    //     .once()
+    //     .then((DatabaseEvent event) async {
+    //   DataSnapshot snapshot = event.snapshot; // Access data from the event
+    //   if (snapshot.value != null) {
+    //     String carType = snapshot.value.toString();
+    //     if (carType == carRideType) {
+    //       notifyDriver(driver);
+    //       availableDrivers!.removeAt(0);
+    //     } else {
+    //       displayToastMessage(carRideType + " driver Not available", context);
+    //     }
+    //   } else {
+    //     displayToastMessage("NoCar Found", context);
+    //   }
+    // });
   }
 
   void notifyDriver(NearbyAvailabelDrivers drivers) async {
@@ -1252,8 +1833,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           token, context, rideRequestRef!.key!);
 
       // Use the token to send a notification
-    }
-    else {
+    } else {
       return;
       print("No token found for driver ${drivers.key}");
     }

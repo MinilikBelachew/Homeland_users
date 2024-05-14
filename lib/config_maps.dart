@@ -11,6 +11,9 @@ String carDetailsDriver="";
 String driverName="";
 String rideStatus="driver is Comming";
 String driverPhone="";
+double startCounter=0;
+String title="";
+String carRideType="";
 
 
 

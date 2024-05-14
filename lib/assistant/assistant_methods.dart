@@ -16,6 +16,8 @@ import 'dart:math';
 
 import 'package:http/http.dart' as http;
 class AssistantMethods {
+
+
   static Future<String> searchCoordinateAddress(Position position,
       context) async {
     String placeAddress = "";
@@ -41,8 +43,8 @@ class AssistantMethods {
       // placeAddress=st1 + " ,"+st2+ " ,"+st3 + " ," +st4 +"";
       //
 
-      Provider.of<AppData>(context, listen: false)
-          .updatePickUpLocationAddress(userPickUpAddress);
+      // Provider.of<AppData>(context, listen: false)
+      //     .updatePickUpLocationAddress(userPickUpAddress);
     }
     return placeAddress;
   }
