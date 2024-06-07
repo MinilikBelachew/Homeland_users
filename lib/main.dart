@@ -8,6 +8,9 @@ import 'package:users/screens/main_screen.dart';
 import 'package:users/screens/otp_screen.dart';
 import 'package:users/screens/signup_screen.dart';
 import "package:firebase_auth/firebase_auth.dart";
+import 'package:flutter/foundation.dart';
+
+import 'package:chapa_unofficial/chapa_unofficial.dart';
 
 Future<void> main() async{
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +25,7 @@ Future<void> main() async{
 
       )
   );
+  Chapa.configure(privateKey: "CHASECK_TEST-xMHE3ZOi6SWCWdERIqabPLsRYwCTs9da");
   runApp(const MyApp());
 }
 
@@ -42,14 +46,19 @@ class MyApp extends StatelessWidget {
         theme: ThemeData(
 
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.black),
+          primaryColor: Colors.blue,
           useMaterial3: true,
         ),
-        initialRoute: FirebaseAuth.instance.currentUser == null ? MainScreen.idScreen:MainScreen.idScreen,
-        routes: {
-         SignupScreen.idScreen:(context) => SignupScreen(),
-          LoginScreen.idScreen:(context) => LoginScreen(),
-          MainScreen.idScreen:(context)=> const MainScreen()
-        },
+          //initialRoute: LoginScreen.idScreen,
+
+          //initialRoute: FirebaseAuth.instance.currentUser == null ? LoginScreen.idScreen:LoginScreen.idScreen,
+          initialRoute: LoginScreen.idScreen,
+          routes: {
+            LoginScreen.idScreen: (context) => const LoginScreen(),
+            SignupScreen.idScreen: (context) => const SignupScreen(),
+            MainScreen.idScreen: (context) => const MainScreen(),
+
+          },
 
         debugShowCheckedModeBanner: false
 
@@ -57,5 +66,7 @@ class MyApp extends StatelessWidget {
     );
   }
 }
+
+
 
 

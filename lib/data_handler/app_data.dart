@@ -6,9 +6,12 @@ import '../models/package_detail.dart';
 class AppData extends ChangeNotifier {
   Address? pickUpLocation,DropOffLocation;
   PackageDetails? packageDetails,description;
+
   bool isEnglishSelected = true;
 
   //Address? DropOffLocation;
+
+
 
 
   void updatePickUpLocationAddress(Address pickUpAddress)

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
+import 'package:firebase_database/firebase_database.dart';
 import 'package:provider/provider.dart';
 import 'package:users/main.dart';
 
@@ -16,10 +17,16 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  File? _avatarImage;
+  File? _profileImage;
+  File? _frontImage;
+  File? _backImage;
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _addressController = TextEditingController();
+  String? _profileImageUrl;
+  String? _frontImageUrl;
+  String? _backImageUrl;
   bool _isEditing = false;
   bool _isFetchingData = true;
 
@@ -34,12 +41,16 @@ class _ProfilePageState extends State<ProfilePage> {
     _nameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
+    _addressController.dispose();
     super.dispose();
   }
 
   Future<void> _fetchUserData() async {
-    final useRrefone = useRref.child(widget.userId);
-    final snapshot = await useRrefone.get();
+    final userRef = FirebaseDatabase.instance
+        .ref()
+        .child('users')
+        .child(widget.userId);
+    final snapshot = await userRef.get();
 
     if (snapshot.exists) {
       final userData = snapshot.value as Map<dynamic, dynamic>;
@@ -47,6 +58,10 @@ class _ProfilePageState extends State<ProfilePage> {
         _nameController.text = userData['name'] ?? '';
         _emailController.text = userData['email'] ?? '';
         _phoneController.text = userData['phone'] ?? '';
+        _profileImageUrl = userData['profileImageUrl'];
+        _addressController.text = userData['address'] ?? '';
+        _frontImageUrl = userData['frontImage'];
+        _backImageUrl = userData['backImage'];
         _isFetchingData = false;
       });
     } else {
@@ -54,40 +69,49 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _pickImage({required String imageType}) async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
     setState(() {
       if (pickedFile != null) {
-        _avatarImage = File(pickedFile.path);
+        if (imageType == 'profile') {
+          _profileImage = File(pickedFile.path);
+        } else if (imageType == 'front') {
+          _frontImage = File(pickedFile.path);
+        } else if (imageType == 'back') {
+          _backImage = File(pickedFile.path);
+        }
       }
     });
   }
 
-  Future<void> _uploadImageToFirebase() async {
-    if (_avatarImage == null) return;
+  Future<void> _uploadImageToFirebase(
+      {required File? image, required String path}) async {
+    if (image == null) return;
 
     final storage = firebase_storage.FirebaseStorage.instance;
-    final reference =
-    storage.ref().child('profile_images').child(widget.userId);
+    final reference = storage.ref().child(path);
 
     try {
-      await reference.putFile(_avatarImage!);
+      await reference.putFile(image);
       final imageUrl = await reference.getDownloadURL();
 
-      final useRrefone = useRref.child(widget.userId);
-      await useRrefone.update({'profileImageUrl': imageUrl});
+      final userRef = FirebaseDatabase.instance
+          .ref("users/$widget.userId/")
+          .child('users')
+          .child(widget.userId);
+      await userRef.update({path.split('/').last: imageUrl});
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Profile image uploaded successfully!'),
+          content: Text('Image uploaded successfully!'),
         ),
       );
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error uploading profile image: $error'),
+          content: Text('Error uploading image: $error'),
         ),
       );
     }
@@ -100,17 +124,27 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _saveProfile() async {
-    final useRrefone = useRref.child(widget.userId);
+    final userRef = FirebaseDatabase.instance
+        .reference()
+        .child('users')
+        .child(widget.userId);
 
     final updates = {
+      'address': _addressController.text,
       'name': _nameController.text,
       'email': _emailController.text,
       'phone': _phoneController.text,
     };
 
     try {
-      await useRrefone.update(updates);
-      await _uploadImageToFirebase();
+      await userRef.update(updates);
+      if (_profileImage != null)
+        await _uploadImageToFirebase(
+            image: _profileImage, path: 'profileImageUrl');
+      if (_frontImage != null)
+        await _uploadImageToFirebase(image: _frontImage, path: 'frontImage');
+      if (_backImage != null)
+        await _uploadImageToFirebase(image: _backImage, path: 'backImage');
       _toggleEditMode();
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -124,11 +158,12 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     AppData languageProvider = Provider.of<AppData>(context);
-    var language = languageProvider.isEnglishSelected ;
+    var language = languageProvider.isEnglishSelected;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.tealAccent,
-        title: Text(language?'Profile':"መገለጫ",
+        title: Text(
+          language ? 'Profile' : "መገለጫ",
           style: TextStyle(
             color: Colors.black,
             fontSize: 20.0,
@@ -138,72 +173,144 @@ class _ProfilePageState extends State<ProfilePage> {
         actions: [
           IconButton(
             icon: Icon(_isEditing ? Icons.save : Icons.edit),
-            onPressed: _toggleEditMode,
+            onPressed: _isEditing ? _saveProfile : _toggleEditMode,
             color: Colors.black,
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.symmetric(horizontal: 30,vertical: 30),
-        child: Column(
-          children: <Widget>[
-            Container(
-              padding: EdgeInsets.all(8.0),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[200]!),
-                borderRadius: BorderRadius.circular(50.0),
+      body: _isFetchingData
+          ? Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: EdgeInsets.symmetric(horizontal: 30, vertical: 30),
+              child: Column(
+                children: <Widget>[
+                  _buildProfileImageSection(
+                    imageFile: _profileImage,
+                    imageUrl: _profileImageUrl,
+                    onTap: () =>
+                        _isEditing ? _pickImage(imageType: 'profile') : null,
+                  ),
+                  SizedBox(height: 20.0),
+                  _buildTextFormField(
+                    controller: _nameController,
+                    label: language ? 'Name' : "ስም",
+                    icon: Icons.person,
+                  ),
+                  SizedBox(height: 10.0),
+                  _buildTextFormField(
+                    controller: _emailController,
+                    label: language ? 'Email' : "ኢሜይል",
+                    icon: Icons.email,
+                  ),
+                  SizedBox(height: 10.0),
+                  _buildTextFormField(
+                    controller: _phoneController,
+                    label: language ? 'Phone Number' : "ስልክ ቁጥር",
+                    icon: Icons.phone,
+                  ),
+                  SizedBox(height: 10.0),
+                  _buildTextFormField(
+                    controller: _addressController,
+                    label: language ? 'Address' : "አድራሻ",
+                    icon: Icons.home_work_outlined,
+                  ),
+                  SizedBox(height: 20.0),
+                  _buildImageSection(
+                    title: language ? 'Front Image' : "ፊት ምስል",
+                    imageFile: _frontImage,
+                    imageUrl: _frontImageUrl,
+                    onTap: () =>
+                        _isEditing ? _pickImage(imageType: 'front') : null,
+                  ),
+                  SizedBox(height: 20.0),
+                  _buildImageSection(
+                    title: language ? 'Back Image' : "ኋላ ምስል",
+                    imageFile: _backImage,
+                    imageUrl: _backImageUrl,
+                    onTap: () =>
+                        _isEditing ? _pickImage(imageType: 'back') : null,
+                  ),
+                  SizedBox(height: 20.0),
+                  ElevatedButton(
+                    onPressed: _isEditing ? _saveProfile : null,
+                    child: Text(language ? 'Save Profile' : "መገለጫ አስቀምጥ"),
+                    style: ElevatedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10.0),
+                      ),
+                      backgroundColor: Colors.tealAccent,
+                    ),
+                  ),
+                ],
               ),
-              child:
-              GestureDetector(
-                onTap: _pickImage,
-                child: CircleAvatar(
-                  radius: 50.0,
-                  backgroundImage: _avatarImage != null
-                      ? _avatarImage!.path.endsWith('.png') ||
-                      _avatarImage!.path.endsWith('.jpg') ||
-                      _avatarImage!.path.endsWith('.jpeg')
-                      ? FileImage(_avatarImage!) as ImageProvider<Object> // Cast to ImageProvider<Object>
-                      : NetworkImage(_avatarImage!.path) as ImageProvider<Object> // Cast to ImageProvider<Object>
-                      : AssetImage('images/user_icon.png') as ImageProvider<Object>, // Cast to ImageProvider<Object>
-                ),
-              ),
             ),
-            SizedBox(height: 20.0),
-            buildTextFormField(
-              controller: _nameController,
-              label: language?'Name':"ስም",
-              icon: Icons.person,
-            ),
-            SizedBox(height: 10.0),
-            buildTextFormField(
-              controller: _emailController,
-              label: language?'Email':"ኢሜይል",
-              icon: Icons.email,
-            ),
-            SizedBox(height: 10.0),
-            buildTextFormField(
-              controller: _phoneController,
-              label: language?'Phone Number':"ስልክ ቁጥር",
-              icon: Icons.phone,
-            ),
-            SizedBox(height: 20.0),
-            ElevatedButton(
-              onPressed: _isEditing ? _saveProfile : null,
-              child: Text(language?'Save Profile':"መገለጫ አስቀምጥ"),
-              style: ElevatedButton.styleFrom(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10.0),
-                ),
-                backgroundColor: Colors.tealAccent,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
-  Widget buildTextFormField({
+  Widget _buildProfileImageSection({
+    required File? imageFile,
+    required String? imageUrl,
+    required Function() onTap,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: CircleAvatar(
+            radius: 50.0,
+            backgroundImage: imageFile != null
+                ? FileImage(imageFile)
+                : imageUrl != null
+                    ? NetworkImage(imageUrl)
+                    : AssetImage('images/user_icon.png') as ImageProvider,
+            backgroundColor: Colors.grey[200],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImageSection({
+    required String title,
+    required File? imageFile,
+    required String? imageUrl,
+    required Function() onTap,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 10.0),
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            height: 150.0,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              borderRadius: BorderRadius.circular(10.0),
+            ),
+            child: imageFile != null
+                ? Image.file(imageFile, fit: BoxFit.cover)
+                : imageUrl != null
+                    ? Image.network(imageUrl, fit: BoxFit.cover)
+                    : Center(
+                        child: Text(
+                          'Tap to add image',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTextFormField({
     required TextEditingController controller,
     required String label,
     required IconData icon,
@@ -228,7 +335,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 }
-
 
 // import 'dart:io';
 //
